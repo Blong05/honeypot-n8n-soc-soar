@@ -1,0 +1,83 @@
+services:
+  # 1. Honeypot Cowrie (Bẫy SSH/Telnet)
+  cowrie:
+    image: cowrie/cowrie:latest
+    container_name: honeypot_cowrie
+    restart: always
+    ports:
+      - "2222:2222"
+    volumes:
+      - cowrie-logs:/cowrie/cowrie-git/var/log/cowrie
+      - ./honeypot/cowrie.cfg:/cowrie/cowrie-git/etc/cowrie.cfg:ro
+    networks:
+      - soc_net
+
+  # 2. SOC Log Forwarder (Đẩy log tự động từ cowrie.json -> n8n)
+  log_forwarder:
+    image: python:3.11-alpine
+    container_name: soc_log_forwarder
+    restart: always
+    volumes:
+      - cowrie-logs:/logs:ro
+      - ./honeypot/forwarder.py:/app/forwarder.py:ro
+    command: sh -c "pip install --no-cache-dir requests && python /app/forwarder.py"
+    networks:
+      - soc_net
+
+  # 3. n8n SOAR Engine
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: automation_n8n
+    restart: always
+    ports:
+      - "5678:5678"
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    environment:
+      - N8N_PORT=5678
+      - WEBHOOK_URL=http://localhost:5678/
+    volumes:
+      - n8n-data:/home/node/.n8n
+    networks:
+      - soc_net
+
+  # 4. PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: soc_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: soc_admin
+      POSTGRES_PASSWORD: 123456
+      POSTGRES_DB: honeypot_soc
+    ports:
+      - "5433:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    networks:
+      - soc_net
+
+  # 5. SOC Web Dashboard (Streamlit)
+  dashboard:
+    image: python:3.11-slim
+    container_name: soc_web_dashboard
+    restart: always
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./web:/app
+    working_dir: /app
+    command: sh -c "apt-get update && apt-get install -y libpq-dev gcc && pip install --default-timeout=1000 --retries 10 --no-cache-dir streamlit pandas sqlalchemy psycopg2-binary && streamlit run app.py --server.port=8501 --server.address=0.0.0.0"
+    networks:
+      - soc_net
+
+networks:
+  soc_net:
+    driver: bridge
+
+volumes:
+  cowrie-logs:
+  n8n-data:
+  pg-data:
+
